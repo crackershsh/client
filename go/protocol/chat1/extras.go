@@ -1154,6 +1154,13 @@ func (c Conversation) IsSelfFinalized(username string) bool {
 	return c.GetMembersType() == ConversationMembersType_KBFS && c.GetFinalizeInfo().IsResetForUser(username)
 }
 
+func (c Conversation) HasMemberStatus(status ConversationMemberStatus) bool {
+	if c.ReaderInfo != nil {
+		return c.ReaderInfo.Status == status
+	}
+	return false
+}
+
 func (m MessageSummary) GetMessageID() MessageID {
 	return m.MsgID
 }
