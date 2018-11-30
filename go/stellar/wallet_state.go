@@ -119,7 +119,7 @@ func (w *WalletState) RefreshAll(mctx libkb.MetaContext, reason string) error {
 
 func (w *WalletState) refreshAll(mctx libkb.MetaContext, reason string) (err error) {
 	defer mctx.CTraceTimed(fmt.Sprintf("WalletState.RefreshAll [%s]", reason), func() error { return err })()
-	bundle, _, _, err := remote.FetchSecretlessBundle(mctx.Ctx(), w.G())
+	bundle, _, err := remote.FetchSecretlessBundle(mctx.Ctx(), w.G())
 	if err != nil {
 		return err
 	}
@@ -550,7 +550,7 @@ func (a *AccountState) String() string {
 	return fmt.Sprintf("%s (seqno: %d, balances: %d, pending: %d, payments: nil)", a.accountID, a.seqno, len(a.balances), len(a.pending))
 }
 
-func (a *AccountState) updateEntry(entry stellar1.BundleEntryRestricted) {
+func (a *AccountState) updateEntry(entry stellar1.BundleEntry) {
 	a.Lock()
 	defer a.Unlock()
 

@@ -17,7 +17,7 @@ import (
 	"github.com/keybase/client/go/protocol/gregor1"
 	"github.com/keybase/client/go/protocol/keybase1"
 	"github.com/keybase/client/go/protocol/stellar1"
-	"github.com/keybase/client/go/stellar/acctbundle"
+	"github.com/keybase/client/go/stellar/bundle"
 	"github.com/keybase/client/go/stellar/relays"
 	"github.com/keybase/client/go/stellar/remote"
 	"github.com/keybase/client/go/stellar/stellarcommon"
@@ -31,14 +31,14 @@ const AccountNameMaxRunes = 24
 // CreateWallet creates and posts an initial stellar bundle for a user.
 // Only succeeds if they do not already have one.
 // Safe (but wasteful) to call even if the user has a bundle already.
-func CreateWallet(ctx context.Context, g *libkb.GlobalContext, v2Link bool) (created bool, err error) {
+func CreateWallet(ctx context.Context, g *libkb.GlobalContext) (created bool, err error) {
 	defer g.CTraceTimed(ctx, "Stellar.CreateWallet", func() error { return err })()
 	loggedInUsername := g.ActiveDevice.Username(libkb.NewMetaContext(ctx, g))
 	if !loggedInUsername.IsValid() {
 		return false, fmt.Errorf("could not get logged-in username")
 	}
 	perUserKeyUpgradeSoft(ctx, g, "create-wallet")
-	clearBundle, err := acctbundle.NewInitial(fmt.Sprintf("%v's account", loggedInUsername))
+	clearBundle, err := bundle.NewInitial(fmt.Sprintf("%v's account", loggedInUsername))
 	if err != nil {
 		return false, err
 	}
@@ -46,7 +46,7 @@ func CreateWallet(ctx context.Context, g *libkb.GlobalContext, v2Link bool) (cre
 	if err != nil {
 		return false, err
 	}
-	err = remote.PostWithChainlink(ctx, g, *clearBundle, v2Link)
+	err = remote.PostWithChainlink(ctx, g, *clearBundle)
 	switch e := err.(type) {
 	case nil:
 		// ok
@@ -108,7 +108,7 @@ func CreateWalletGated(ctx context.Context, g *libkb.GlobalContext) (res CreateW
 		g.Log.CDebugf(ctx, "CreateWalletGated: server did not recommend wallet creation")
 		return res, nil
 	}
-	justCreated, err := CreateWallet(ctx, g, false)
+	justCreated, err := CreateWallet(ctx, g)
 	if err != nil {
 		return res, nil
 	}
@@ -134,7 +134,7 @@ func CreateWalletSoft(ctx context.Context, g *libkb.GlobalContext) {
 // Upkeep makes sure the bundle is encrypted for the user's latest PUK.
 func Upkeep(ctx context.Context, g *libkb.GlobalContext) (err error) {
 	defer g.CTraceTimed(ctx, "Stellar.Upkeep", func() error { return err })()
-	prevBundle, version, prevPukGen, err := remote.FetchWholeBundle(ctx, g)
+	prevBundle, prevPukGen, err := remote.FetchWholeBundle(ctx, g)
 	if err != nil {
 		return err
 	}
@@ -151,28 +151,17 @@ func Upkeep(ctx context.Context, g *libkb.GlobalContext) (err error) {
 		g.Log.CDebugf(ctx, "Stellar.Upkeep: early out prevPukGen:%v < pukGen:%v", prevPukGen, pukGen)
 		return nil
 	}
-	nextBundle := acctbundle.AdvanceAll(*prevBundle)
-	return remote.Post(ctx, g, nextBundle, version)
+	nextBundle := bundle.AdvanceAll(*prevBundle)
+	return remote.Post(ctx, g, nextBundle)
 }
 
 func ImportSecretKey(ctx context.Context, g *libkb.GlobalContext, secretKey stellar1.SecretKey, makePrimary bool, accountName string) (err error) {
-	prevBundle, version, _, err := remote.FetchSecretlessBundle(ctx, g)
+	prevBundle, _, err := remote.FetchSecretlessBundle(ctx, g)
 	if err != nil {
 		return err
 	}
-	var v2Link bool
-	if version == stellar1.BundleVersion_V1 {
-		prevBundle, _, _, err = remote.FetchWholeBundle(ctx, g)
-		if err != nil {
-			return err
-		}
-		v2Link = false
-	} else {
-		v2Link = true
-	}
-
-	nextBundle := acctbundle.AdvanceBundle(*prevBundle)
-	err = acctbundle.AddAccount(&nextBundle, secretKey, accountName, makePrimary)
+	nextBundle := bundle.AdvanceBundle(*prevBundle)
+	err = bundle.AddAccount(&nextBundle, secretKey, accountName, makePrimary)
 	if err != nil {
 		return err
 	}
@@ -180,9 +169,9 @@ func ImportSecretKey(ctx context.Context, g *libkb.GlobalContext, secretKey stel
 	if makePrimary {
 		// primary account changes need sigchain link
 		// (so other users can find user's primary account id)
-		err = remote.PostWithChainlink(ctx, g, nextBundle, v2Link)
+		err = remote.PostWithChainlink(ctx, g, nextBundle)
 	} else {
-		err = remote.Post(ctx, g, nextBundle, version)
+		err = remote.Post(ctx, g, nextBundle)
 	}
 	if err != nil {
 		return err
@@ -236,7 +225,7 @@ func EnableMigrationFeatureFlag(ctx context.Context, g *libkb.GlobalContext) err
 }
 
 func ExportSecretKey(ctx context.Context, g *libkb.GlobalContext, accountID stellar1.AccountID) (res stellar1.SecretKey, err error) {
-	prevBundle, _, _, err := remote.FetchAccountBundle(ctx, g, accountID)
+	prevBundle, _, err := remote.FetchAccountBundle(ctx, g, accountID)
 	if err != nil {
 		return res, err
 	}
@@ -261,7 +250,7 @@ func ExportSecretKey(ctx context.Context, g *libkb.GlobalContext, accountID stel
 }
 
 func OwnAccount(ctx context.Context, g *libkb.GlobalContext, accountID stellar1.AccountID) (own, isPrimary bool, err error) {
-	bundle, _, _, err := remote.FetchSecretlessBundle(ctx, g)
+	bundle, _, err := remote.FetchSecretlessBundle(ctx, g)
 	if err != nil {
 		return false, false, err
 	}
@@ -273,22 +262,22 @@ func OwnAccount(ctx context.Context, g *libkb.GlobalContext, accountID stellar1.
 	return false, false, nil
 }
 
-func lookupSenderEntry(ctx context.Context, g *libkb.GlobalContext, accountID stellar1.AccountID) (stellar1.BundleEntryRestricted, stellar1.AccountBundle, error) {
+func lookupSenderEntry(ctx context.Context, g *libkb.GlobalContext, accountID stellar1.AccountID) (stellar1.BundleEntry, stellar1.AccountBundle, error) {
 	if accountID == "" {
-		bundle, _, _, err := remote.FetchSecretlessBundle(ctx, g)
+		bundle, _, err := remote.FetchSecretlessBundle(ctx, g)
 		if err != nil {
-			return stellar1.BundleEntryRestricted{}, stellar1.AccountBundle{}, err
+			return stellar1.BundleEntry{}, stellar1.AccountBundle{}, err
 		}
 		entry, err := bundle.PrimaryAccount()
 		if err != nil {
-			return stellar1.BundleEntryRestricted{}, stellar1.AccountBundle{}, err
+			return stellar1.BundleEntry{}, stellar1.AccountBundle{}, err
 		}
 		accountID = entry.AccountID
 	}
 
-	bundle, _, _, err := remote.FetchAccountBundle(ctx, g, accountID)
+	bundle, _, err := remote.FetchAccountBundle(ctx, g, accountID)
 	if err != nil {
-		return stellar1.BundleEntryRestricted{}, stellar1.AccountBundle{}, err
+		return stellar1.BundleEntry{}, stellar1.AccountBundle{}, err
 	}
 
 	for _, entry := range bundle.Accounts {
@@ -297,23 +286,23 @@ func lookupSenderEntry(ctx context.Context, g *libkb.GlobalContext, accountID st
 		}
 	}
 
-	return stellar1.BundleEntryRestricted{}, stellar1.AccountBundle{}, libkb.NotFoundError{Msg: fmt.Sprintf("Sender account not found")}
+	return stellar1.BundleEntry{}, stellar1.AccountBundle{}, libkb.NotFoundError{Msg: fmt.Sprintf("Sender account not found")}
 }
 
-func LookupSenderPrimary(ctx context.Context, g *libkb.GlobalContext) (stellar1.BundleEntryRestricted, stellar1.AccountBundle, error) {
+func LookupSenderPrimary(ctx context.Context, g *libkb.GlobalContext) (stellar1.BundleEntry, stellar1.AccountBundle, error) {
 	return LookupSender(ctx, g, "" /* empty account id returns primary */)
 }
 
-func LookupSender(ctx context.Context, g *libkb.GlobalContext, accountID stellar1.AccountID) (stellar1.BundleEntryRestricted, stellar1.AccountBundle, error) {
+func LookupSender(ctx context.Context, g *libkb.GlobalContext, accountID stellar1.AccountID) (stellar1.BundleEntry, stellar1.AccountBundle, error) {
 	entry, ab, err := lookupSenderEntry(ctx, g, accountID)
 	if err != nil {
-		return stellar1.BundleEntryRestricted{}, stellar1.AccountBundle{}, err
+		return stellar1.BundleEntry{}, stellar1.AccountBundle{}, err
 	}
 	if len(ab.Signers) == 0 {
-		return stellar1.BundleEntryRestricted{}, stellar1.AccountBundle{}, errors.New("no signer for bundle")
+		return stellar1.BundleEntry{}, stellar1.AccountBundle{}, errors.New("no signer for bundle")
 	}
 	if len(ab.Signers) > 1 {
-		return stellar1.BundleEntryRestricted{}, stellar1.AccountBundle{}, errors.New("only single signer supported")
+		return stellar1.BundleEntry{}, stellar1.AccountBundle{}, errors.New("only single signer supported")
 	}
 
 	return entry, ab, nil
@@ -1043,7 +1032,7 @@ func isAccountFunded(ctx context.Context, remoter remote.Remoter, accountID stel
 }
 
 func GetOwnPrimaryAccountID(ctx context.Context, g *libkb.GlobalContext) (res stellar1.AccountID, err error) {
-	activeBundle, _, _, err := remote.FetchSecretlessBundle(ctx, g)
+	activeBundle, _, err := remote.FetchSecretlessBundle(ctx, g)
 	if err != nil {
 		return res, err
 	}
@@ -1517,21 +1506,15 @@ func ChangeAccountName(m libkb.MetaContext, accountID stellar1.AccountID, newNam
 	if runes > AccountNameMaxRunes {
 		return fmt.Errorf("account name can be %v characters at the longest but was %v", AccountNameMaxRunes, runes)
 	}
-	bundle, version, _, err := remote.FetchSecretlessBundle(m.Ctx(), m.G())
+	b, _, err := remote.FetchSecretlessBundle(m.Ctx(), m.G())
 	if err != nil {
 		return err
 	}
-	if version == stellar1.BundleVersion_V1 {
-		bundle, _, _, err = remote.FetchWholeBundle(m.Ctx(), m.G())
-		if err != nil {
-			return err
-		}
-	}
 	var found bool
-	for i, acc := range bundle.Accounts {
+	for i, acc := range b.Accounts {
 		if acc.AccountID.Eq(accountID) {
 			// Change Name in place to modify Account struct.
-			bundle.Accounts[i].Name = newName
+			b.Accounts[i].Name = newName
 			found = true
 		} else if acc.Name == newName {
 			return fmt.Errorf("you already have an account with that name")
@@ -1540,29 +1523,29 @@ func ChangeAccountName(m libkb.MetaContext, accountID stellar1.AccountID, newNam
 	if !found {
 		return fmt.Errorf("account not found: %v", accountID)
 	}
-	nextBundle := acctbundle.AdvanceBundle(*bundle)
-	return remote.Post(m.Ctx(), m.G(), nextBundle, version)
+	nextBundle := bundle.AdvanceBundle(*b)
+	return remote.Post(m.Ctx(), m.G(), nextBundle)
 }
 
 func SetAccountAsPrimary(m libkb.MetaContext, accountID stellar1.AccountID) (err error) {
 	if accountID.IsNil() {
 		return errors.New("passed empty AccountID")
 	}
-	bundle, version, _, err := remote.FetchAccountBundle(m.Ctx(), m.G(), accountID)
+	b, _, err := remote.FetchAccountBundle(m.Ctx(), m.G(), accountID)
 	if err != nil {
 		return err
 	}
 	var foundAccID, foundPrimary bool
-	for i, acc := range bundle.Accounts {
+	for i, acc := range b.Accounts {
 		if acc.AccountID.Eq(accountID) {
 			if acc.IsPrimary {
 				// Nothing to do.
 				return nil
 			}
-			bundle.Accounts[i].IsPrimary = true
+			b.Accounts[i].IsPrimary = true
 			foundAccID = true
 		} else if acc.IsPrimary {
-			bundle.Accounts[i].IsPrimary = false
+			b.Accounts[i].IsPrimary = false
 			foundPrimary = true
 		}
 
@@ -1573,22 +1556,20 @@ func SetAccountAsPrimary(m libkb.MetaContext, accountID stellar1.AccountID) (err
 	if !foundAccID {
 		return fmt.Errorf("account not found: %v", accountID)
 	}
-	nextBundle := acctbundle.AdvanceAccounts(*bundle, []stellar1.AccountID{accountID})
-	var v2Link bool
-	v2Link = !(version == stellar1.BundleVersion_V1)
-	return remote.PostWithChainlink(m.Ctx(), m.G(), nextBundle, v2Link)
+	nextBundle := bundle.AdvanceAccounts(*b, []stellar1.AccountID{accountID})
+	return remote.PostWithChainlink(m.Ctx(), m.G(), nextBundle)
 }
 
 func DeleteAccount(m libkb.MetaContext, accountID stellar1.AccountID) error {
 	if accountID.IsNil() {
 		return errors.New("passed empty AccountID")
 	}
-	prevBundle, version, _, err := remote.FetchAccountBundle(m.Ctx(), m.G(), accountID)
+	prevBundle, _, err := remote.FetchAccountBundle(m.Ctx(), m.G(), accountID)
 	if err != nil {
 		return err
 	}
 
-	nextBundle := acctbundle.AdvanceBundle(*prevBundle)
+	nextBundle := bundle.AdvanceBundle(*prevBundle)
 	var found bool
 	for i, acc := range nextBundle.Accounts {
 		if acc.AccountID.Eq(accountID) {
@@ -1605,7 +1586,7 @@ func DeleteAccount(m libkb.MetaContext, accountID stellar1.AccountID) error {
 	if !found {
 		return fmt.Errorf("account not found: %v", accountID)
 	}
-	return remote.Post(m.Ctx(), m.G(), nextBundle, version)
+	return remote.Post(m.Ctx(), m.G(), nextBundle)
 }
 
 const DefaultCurrencySetting = "USD"
@@ -1651,22 +1632,16 @@ func accountIDFromSecretKey(skey stellar1.SecretKey) (stellar1.AccountID, error)
 }
 
 func CreateNewAccount(m libkb.MetaContext, accountName string) (ret stellar1.AccountID, err error) {
-	prevBundle, version, _, err := remote.FetchSecretlessBundle(m.Ctx(), m.G())
+	prevBundle, _, err := remote.FetchSecretlessBundle(m.Ctx(), m.G())
 	if err != nil {
 		return ret, err
 	}
-	if version == stellar1.BundleVersion_V1 {
-		prevBundle, _, _, err = remote.FetchWholeBundle(m.Ctx(), m.G())
-		if err != nil {
-			return ret, err
-		}
-	}
-	nextBundle := acctbundle.AdvanceBundle(*prevBundle)
-	ret, err = acctbundle.CreateNewAccount(&nextBundle, accountName, false /* makePrimary */)
+	nextBundle := bundle.AdvanceBundle(*prevBundle)
+	ret, err = bundle.CreateNewAccount(&nextBundle, accountName, false /* makePrimary */)
 	if err != nil {
 		return ret, err
 	}
-	return ret, remote.Post(m.Ctx(), m.G(), nextBundle, version)
+	return ret, remote.Post(m.Ctx(), m.G(), nextBundle)
 }
 
 func chatSendPaymentMessage(m libkb.MetaContext, recipient stellarcommon.Recipient, txID stellar1.TransactionID) error {

@@ -290,7 +290,7 @@ func (s *Server) WalletInitLocal(ctx context.Context) (err error) {
 		return err
 	}
 
-	_, err = stellar.CreateWallet(ctx, s.G(), false)
+	_, err = stellar.CreateWallet(ctx, s.G())
 	return err
 }
 
@@ -345,7 +345,7 @@ func (s *Server) WalletGetAccountsCLILocal(ctx context.Context) (ret []stellar1.
 
 	mctx := s.mctx(ctx)
 
-	currentBundle, _, _, err := remote.FetchSecretlessBundle(ctx, s.G())
+	currentBundle, _, err := remote.FetchSecretlessBundle(ctx, s.G())
 	if err != nil {
 		return nil, err
 	}
