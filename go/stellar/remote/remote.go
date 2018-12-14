@@ -38,16 +38,6 @@ func ShouldCreate(ctx context.Context, g *libkb.GlobalContext) (res ShouldCreate
 	return apiRes.ShouldCreateResult, err
 }
 
-func acctBundlesEnabled(m libkb.MetaContext) bool {
-	// TODO: leave this here for now because it might be nice for catching a
-	// situation with bad feature flags
-	enabled := m.G().FeatureFlags.Enabled(m, libkb.FeatureStellarAcctBundles)
-	if enabled {
-		m.CDebugf("stellar account bundles enabled")
-	}
-	return enabled
-}
-
 func buildChainLinkPayload(m libkb.MetaContext, b stellar1.Bundle, me *libkb.User, pukGen keybase1.PerUserKeyGeneration, pukSeed libkb.PerUserKeySeed, deviceSigKey libkb.GenericKey) (*libkb.JSONPayload, error) {
 	err := b.CheckInvariants()
 	if err != nil {

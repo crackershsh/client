@@ -206,24 +206,6 @@ func ImportSecretKey(ctx context.Context, g *libkb.GlobalContext, secretKey stel
 	return nil
 }
 
-func EnableMigrationFeatureFlag(ctx context.Context, g *libkb.GlobalContext) error {
-	if g.GetRunMode() == libkb.ProductionRunMode {
-		return errors.New("this doesn't work in production")
-	}
-	m := libkb.NewMetaContext(ctx, g)
-	_, err := g.API.Post(libkb.APIArg{
-		Endpoint:    "test/feature",
-		SessionType: libkb.APISessionTypeREQUIRED,
-		Args: libkb.HTTPArgs{
-			"feature":   libkb.S{Val: string(libkb.FeatureStellarAcctBundles)},
-			"value":     libkb.I{Val: 1},
-			"cache_sec": libkb.I{Val: 100},
-		},
-		MetaContext: m,
-	})
-	return err
-}
-
 func ExportSecretKey(ctx context.Context, g *libkb.GlobalContext, accountID stellar1.AccountID) (res stellar1.SecretKey, err error) {
 	prevBundle, _, err := remote.FetchAccountBundle(ctx, g, accountID)
 	if err != nil {
