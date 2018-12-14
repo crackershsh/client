@@ -717,6 +717,23 @@
     },
     {
       "type": "record",
+      "name": "InflationDestinationResultLocal",
+      "fields": [
+        {
+          "type": [
+            null,
+            "AccountID"
+          ],
+          "name": "destination"
+        },
+        {
+          "type": "string",
+          "name": "comment"
+        }
+      ]
+    },
+    {
+      "type": "record",
       "name": "SendResultCLILocal",
       "fields": [
         {
@@ -1557,10 +1574,7 @@
           "type": "AccountID"
         }
       ],
-      "response": [
-        null,
-        "AccountID"
-      ]
+      "response": "InflationDestinationResultLocal"
     },
     "balancesLocal": {
       "request": [
